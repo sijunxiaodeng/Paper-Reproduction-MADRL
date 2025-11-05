@@ -4,7 +4,7 @@ from Algorithm2 import *
 
 def simulate_scenario1():
     """场景1：变化主机数量（3-9），测试可扩展性"""
-    num_hosts_list = [3]
+    num_hosts_list = [3,5,7,9]
     results = {}
 
     for num_hosts in num_hosts_list:
@@ -14,7 +14,7 @@ def simulate_scenario1():
             num_hosts=num_hosts,
             num_defenders=3,
             num_attackers=3,
-            num_rounds=10000
+            num_rounds=1000
         )
 
 

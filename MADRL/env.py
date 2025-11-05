@@ -153,13 +153,15 @@ class Defender(Agent):
                 # 此处为简化实现，采用随机采样策略评估Q值
                 candidate_strats = [self.generate_random_strategy() for _ in range(20)]
                 q_values = []
-
                 for strat in candidate_strats:
-                    # 状态-动作拼接（简化动作表示）
-                    state_action = np.concatenate([state, strat])
-                    sa_tensor = torch.tensor(state_action, dtype=torch.float32)
-                    q_val = self.dqn(sa_tensor).item()
+                    # 拼接状态和动作，转换为张量并迁移到GPU
+                    sa_tensor = torch.tensor(
+                        np.concatenate([state, strat]),
+                        dtype=torch.float32
+                    ).to(device)  # 数据迁移到GPU
+                    q_val = self.dqn(sa_tensor).item()  # 模型在GPU上计算
                     q_values.append(q_val)
+
 
                 # 选择Q值最大的策略
                 best_idx = np.argmax(q_values)
@@ -192,70 +194,70 @@ class Defender(Agent):
 
         return selected_samples
 
-    def train_dqn(self, gamma=0.8, batch_size=3):
-        """训练DQN网络（算法1/2的更新逻辑）"""
-        if len(self.experience_replay) < batch_size or self.dqn is None:
-            return 0.0  # 经验不足，不训练
+    def train_dqn(self, gamma=0.8, batch_size=32):
+        if len(self.experience_replay) < batch_size:
+            return 0.0
 
-        # 采样批次（算法1：仅自身经验；算法2：所有防御者经验）
+        # 采样批量样本
         batch = self.strategy_based_sampling(batch_size)
+        states, actions, rewards, next_states = zip(*batch)  # 解压为列表
 
-        # 准备训练数据
-        states = []
-        actions = []
-        rewards = []
-        next_states = []
+        # 1. 列表→numpy数组（解决警告）
+        states_np = np.array(states)
+        actions_np = np.array(actions)
+        rewards_np = np.array(rewards)
+        next_states_np = np.array(next_states)
 
-        for s, a, r, ns in batch:
-            states.append(s)
-            actions.append(a)
-            rewards.append(r)
-            next_states.append(ns)
+        # 2. numpy数组→张量，并迁移到GPU（解决设备不匹配）
+        states_tensor = torch.tensor(states_np, dtype=torch.float32).to(device)
+        actions_tensor = torch.tensor(actions_np, dtype=torch.float32).to(device)
+        rewards_tensor = torch.tensor(rewards_np, dtype=torch.float32).to(device)
+        next_states_tensor = torch.tensor(next_states_np, dtype=torch.float32).to(device)
 
-        # 转换为张量
-        states_tensor = torch.tensor(np.array(states), dtype=torch.float32)
-        rewards_tensor = torch.tensor(rewards, dtype=torch.float32)
-        next_states_tensor = torch.tensor(np.array(next_states), dtype=torch.float32)
+        # 3. 计算当前Q值（确保输入在GPU）
+        current_input = torch.cat([states_tensor, actions_tensor], dim=1)  # 拼接状态和动作
+        current_q = self.dqn(current_input).squeeze()  # 模型在GPU上计算
 
-        # 计算目标Q值
+        # 4. 计算目标Q值（确保下一状态的输入也在GPU）
         target_q = []
         for i in range(batch_size):
-            # 计算next_state的最大Q值
             next_state = next_states[i]
-            next_state_tensor = torch.tensor(next_state, dtype=torch.float32)
-
-            # 采样候选策略评估next_state的Q值
-            candidate_strats = [self.generate_random_strategy() for _ in range(20)]
+            # 生成下一状态的候选动作（假设已实现）
+            next_candidate_actions = self.generate_candidate_actions(next_state)
+            # 计算每个候选动作的Q值（确保输入在GPU）
             next_q_values = []
-            for strat in candidate_strats:
-                ns_action = np.concatenate([next_state, strat])
-                ns_action_tensor = torch.tensor(ns_action, dtype=torch.float32)
+            for act in next_candidate_actions:
+                ns_action_np = np.concatenate([next_state, act])  # 先转numpy
+                ns_action_tensor = torch.tensor(ns_action_np, dtype=torch.float32).to(device)  # 迁移到GPU
                 next_q = self.dqn(ns_action_tensor).item()
                 next_q_values.append(next_q)
+            max_next_q = max(next_q_values)
+            target_q.append(rewards[i] + gamma * max_next_q)
 
-            max_next_q = max(next_q_values) if next_q_values else 0.0
-            target = rewards[i] + gamma * max_next_q
-            target_q.append(target)
+        # 5. 目标Q值转张量并迁移到GPU
+        target_q_tensor = torch.tensor(target_q, dtype=torch.float32).to(device)
 
-        target_q_tensor = torch.tensor(target_q, dtype=torch.float32)
-
-        # 计算当前Q值
-        current_q = []
-        for i in range(batch_size):
-            state_action = np.concatenate([states[i], actions[i]])
-            sa_tensor = torch.tensor(state_action, dtype=torch.float32)
-            q_val = self.dqn(sa_tensor)
-            current_q.append(q_val)
-
-        current_q_tensor = torch.stack(current_q).squeeze()
-
-        # 反向传播优化
-        loss = self.loss_fn(current_q_tensor, target_q_tensor)
+        # 6. 计算损失并更新（均在GPU上）
+        loss = self.loss_fn(current_q, target_q_tensor)
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
 
         return loss.item()
+
+    def generate_candidate_actions(self, next_state, num_candidates=10):
+        """
+        为下一状态生成候选动作（资源分配策略）
+        :param next_state: 下一状态（无需使用，仅为接口统一）
+        :param num_candidates: 候选策略数量
+        :return: 候选策略列表（每个元素是形状为[num_hosts]的资源分配数组）
+        """
+        candidates = []
+        for _ in range(num_candidates):
+            # 调用已有的随机策略生成方法，生成合法的资源分配策略
+            strategy = self.generate_random_strategy()
+            candidates.append(strategy)
+        return candidates
 
     def calculate_reward(self, group_utility, used_resources):
         """计算单轮奖励（论文定义：个体效用/使用资源）"""
