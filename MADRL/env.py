@@ -96,7 +96,7 @@ class Defender(Agent):
     def init_dqn(self, state_dim, action_dim, lr=0.1):
         """初始化DQN网络"""
         self.dqn = nn.Sequential(
-            nn.Linear(state_dim, 1000),
+            nn.Linear(state_dim, 1000),#the number of nodes 1000
             nn.ReLU(),
             nn.Linear(1000, 1000),
             nn.ReLU(),
@@ -112,8 +112,11 @@ class Defender(Agent):
         self.state_history.append(observation)
 
     def get_current_state(self):
+
+        """但是按照原文有可能出现部分可观测情况暂时未写入算法"""
+
         """获取当前状态（扁平化的历史观测向量）
-        状态维度：T * (M*N + L*N)，其中N为宿主数量
+        状态维度：T * (M*N + L*N)，其中N为host数量
         """
         if len(self.state_history) < self.T:
             # 状态历史不足时，用全零向量填充
@@ -128,7 +131,7 @@ class Defender(Agent):
         else:
             full_history = list(self.state_history)
 
-        # 扁平化状态向量
+        # 扁平化状态向量  多维->一维
         state_vec = []
         for def_strats, att_strats in full_history:
             state_vec.extend(def_strats.flatten())

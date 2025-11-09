@@ -1,5 +1,5 @@
 import numpy as np
-from env import Host,Agent,Defender,Attacker
+from env import Host,Defender,Attacker
 
 
 def algorithm1_single_defender_attacker(
@@ -8,11 +8,11 @@ def algorithm1_single_defender_attacker(
     attacker_resources=6,
     host_importances=None,
     T=5,
-    num_rounds=10000,
+    num_rounds=1000,
     epsilon=0.8,
     gamma=0.8,
     batch_size=3,
-    lr=0.001
+    lr=0.1
 ):
     """
     算法1：单防御者-单攻击者场景的深度Q学习
@@ -42,6 +42,7 @@ def algorithm1_single_defender_attacker(
 
     # 初始化DQN：状态维度 = T*(1*N + 1*N)，动作维度简化为1（策略向量通过采样评估）
     state_dim = T * (1 * num_hosts + 1 * num_hosts)
+
     action_dim = 1  # 实际动作空间为离散策略集合，此处简化
     defender.init_dqn(state_dim, action_dim, lr=lr)
 
@@ -96,8 +97,6 @@ def algorithm1_single_defender_attacker(
         loss = defender.train_dqn(gamma=gamma, batch_size=batch_size)
         losses.append(loss)
 
-        # 11. 动态调整epsilon（探索率衰减）
-        if round % 1000 == 0 and epsilon > 0.1:
-            epsilon *= 0.9
+
 
     return defender_utilities, losses, ne_utility
